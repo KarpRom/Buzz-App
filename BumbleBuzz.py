@@ -3,11 +3,9 @@ import pandas as pd
 import numpy as np
 import os
 import random
-import librosa
-import librosa.display
-import matplotlib.pyplot as plt
-import io
-import time
+
+import audio_utils
+from audio_utils import create_spectrogram
 
 st.set_page_config(
     page_title="BumbleBuzz", 
@@ -155,49 +153,10 @@ def update_label(df, row_name, column, value):
 def load_audio(audio_path, duration=5):
     """Load audio file and return first 5 seconds"""
     try:
-        audio, sr = librosa.load(audio_path, sr=None)
-        # Return first 5 seconds
-        return audio[:duration * sr], sr
+        return audio_utils.load_audio(audio_path, duration)
     except Exception as e:
         st.error(f"Error loading audio: {str(e)}")
         return None, None
-
-def create_spectrogram(audio, sr, n_fft, hop_length, db_range):
-    """Create and return spectrogram plot"""
-    # https://librosa.org/doc/0.11.0/generated/librosa.display.specshow.html
-    fig, ax = plt.subplots(figsize=(10, 4))
-    
-    D = librosa.amplitude_to_db(
-        np.abs(librosa.stft(audio, n_fft=n_fft, hop_length=hop_length)), 
-        ref=np.max
-    )
-    
-    # Calculate vmin and vmax based on db_range
-    vmax = np.max(D)
-    vmin = vmax - db_range
-    
-    img = librosa.display.specshow(
-        D, sr=sr, hop_length=hop_length, 
-        x_axis='time', y_axis='hz', 
-        ax=ax, vmin=vmin, vmax=vmax,
-        cmap='viridis'
-    )
-    
-    ax.set_title("Audio Spectrogram", fontsize=14, fontweight='bold')
-    ax.set_xlabel("Time (s)")
-    ax.set_ylabel("Frequency (Hz)")
-    
-    cbar = plt.colorbar(img, ax=ax, format="%+2.0f dB")
-    cbar.set_label("Power (dB)")
-    
-    plt.tight_layout()
-    
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=100, bbox_inches='tight')
-    plt.close(fig)
-    buf.seek(0)
-    
-    return buf
 
 if csv_file and audio_folder and os.path.exists(audio_folder):
     current_csv_name = csv_file.name if csv_file else None
@@ -271,7 +230,7 @@ if csv_file and audio_folder and os.path.exists(audio_folder):
             currentsite = current_row['site']
         else:
             audio_path = os.path.join(audio_folder, current_row['flacfile'])
-            currentsite = original_name
+            currentsite = os.path.splitext(st.session_state.csv_file_name)[0] if st.session_state.csv_file_name else "-"
         
         st.markdown(f"""
             <div class="audio-info">
@@ -300,14 +259,12 @@ if csv_file and audio_folder and os.path.exists(audio_folder):
                     with decision_col1:
                         if st.button("✅ BUZZ DETECTED", type="secondary", use_container_width=True):
                             df = update_label(df, current_row.name, 'label_listened', 1)
-                            st.success("✅ Marked as BUZZ")
-                            time.sleep(0.5)
+                            st.rerun()
                     
                     with decision_col2:
                         if st.button("❌ NO BUZZ", type="secondary", use_container_width=True):
                             df = update_label(df, current_row.name, 'label_listened', 0)
-                            st.success("✅ Marked as NO BUZZ")
-                            time.sleep(0.5)
+                            st.rerun()
                     
                     st.subheader("Change Audio File")
                     nav_col1, nav_col2 = st.columns(2)
@@ -316,9 +273,10 @@ if csv_file and audio_folder and os.path.exists(audio_folder):
                         if st.button("➡️ NEXT", use_container_width=True):
                             if df.at[current_row.name, 'label_listened'] == -1:
                                 st.warning("Audio was not labeled, it can be verified again later by reloading the file.")
+                                st.session_state.current_index += 1
                             else:
+                                # This row leaves the unlistened queue: the next one takes its index.
                                 df = update_label(df, current_row.name, 'listened', 1)
-                            st.session_state.current_index += 1
                             st.success("➡️ Moving to next audio...")
                             st.rerun()
                     
